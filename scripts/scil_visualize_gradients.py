@@ -18,8 +18,8 @@ from scilpy.io.utils import (add_overwrite_arg,
                              assert_inputs_exist,
                              assert_outputs_exist)
 from scilpy.viz.gradient_sampling import (build_ms_from_shell_idx,
-                                          plot_each_shell,
-                                          plot_proj_shell)
+                                          load_colors, plot_each_shell,
+                                          plot_proj_shell, preload_cusp_cube)
 
 
 def _build_arg_parser():
@@ -43,24 +43,47 @@ def _build_arg_parser():
         '--res', type=int, default=300,
         help='Resolution of the output picture(s).')
 
-    g1 = p.add_argument_group(title='Enable/Disable renderings.')
+    g1 = p.add_argument_group(title='CUSP acquisition parameters')
     g1.add_argument(
+        '--cusp', action='store_true', dest='is_cusp',
+        help='Specify input as CUSP sampling.')
+    g1.add_argument(
+        '--b_nominal', type=int, help='Nominal b-value for CUSP sampling.')
+
+    g2 = p.add_argument_group(title='Enable/Disable renderings.')
+    g2.add_argument(
         '--dis-sphere', action='store_false', dest='enable_sph',
         help='Disable the rendering of the sphere.')
-    g1.add_argument(
+    g2.add_argument(
         '--dis-proj', action='store_false', dest='enable_proj',
         help='Disable rendering of the projection supershell.')
-    g1.add_argument(
+    g2.add_argument(
         '--plot_shells', action='store_true',
         help='Enable rendering each shell individually.')
-
-    g2 = p.add_argument_group(title='Rendering options.')
     g2.add_argument(
+        '--plot_vectors', action='store_true',
+        help='Enable rendering of the lines connecting '
+             'each vector to the origin.')
+
+    g3 = p.add_argument_group(title='Rendering options.')
+    g3.add_argument(
         '--same-color', action='store_true', dest='same_color',
         help='Use same color for all shell.')
-    g2.add_argument(
+    g3.add_argument(
         '--opacity', type=float, default=1.0,
         help='Opacity for the shells.')
+    g3.add_argument(
+        '--linewidth', type=float, default=2.0,
+        help='Width of lines plotted')
+    g3.add_argument(
+        '--rot_x', type=float, default=0.0,
+        help='Camera rotation around focal point with respect to x axis')
+    g3.add_argument(
+        '--rot_y', type=float, default=0.0,
+        help='Camera rotation around focal point with respect to y axis')
+    g3.add_argument(
+        '--rot_z', type=float, default=0.0,
+        help='Camera rotation around focal point with respect to z axis')
 
     add_overwrite_arg(p)
     add_verbose_arg(p)
@@ -125,20 +148,68 @@ def main():
         centroids = np.delete(centroids,  np.where(centroids == b0))
 
     shell_idx[shell_idx != -1] -= 1
+    n_shells = len(np.unique(shell_idx[shell_idx != -1]))
+
+    linewidth = args.linewidth
+    rotation = [args.rot_x, args.rot_y, args.rot_z]
 
     sym = args.enable_sym
     sph = args.enable_sph
+    vec = args.plot_vectors
     same = args.same_color
+    cusp = args.is_cusp
+    cusp_ms, cusp_centroids = None, None
+
+    if cusp:
+        cube_centroids_mask = np.logical_and(
+            centroids > args.b_nominal, centroids <= 3 * args.b_nominal)
+        cube_idx_mask = np.array(
+            [s in np.where(cube_centroids_mask)[0] for s in shell_idx])
+        cube_idx = np.copy(shell_idx)
+        cube_idx[cube_idx_mask] -= cube_idx[cube_idx_mask].min()
+        cube_idx[~cube_idx_mask] = -1
+        cusp_centroids = []
+        for bval in centroids[cube_centroids_mask]:
+            centroid_idx = np.where(centroids == bval)[0][0]
+            shell_idx[shell_idx == centroid_idx] = -1
+            shell_idx[shell_idx > centroid_idx] -= 1
+            centroids = np.delete(centroids, np.where(centroids == bval))
+            cusp_centroids.append(bval)
+
+        cusp_ms = build_ms_from_shell_idx(points, cube_idx)
 
     ms = build_ms_from_shell_idx(points, shell_idx)
     if proj:
-        plot_proj_shell(ms, use_sym=sym, use_sphere=sph, same_color=same,
-                        rad=0.025, opacity=args.opacity,
-                        ofile=out_basename, ores=(args.res, args.res))
+        scene = None
+        load_colors(n_shells)
+        if cusp:
+            opacity = 0.7 if np.isclose(args.opacity, 1.) else args.opacity
+            scene = preload_cusp_cube(
+                cusp_ms, np.array(cusp_centroids), args.b_nominal, use_sym=sym,
+                use_cube=sph, use_vectors=vec, same_color=same, render=False,
+                opacity=opacity, linewidth=linewidth, rotation=rotation,
+                ofile=out_basename, ores=(args.res, args.res))
+
+        plot_proj_shell(ms, use_sym=sym, use_sphere=sph, use_vectors=vec,
+                        same_color=same, rad=0.025, opacity=args.opacity,
+                        linewidth=linewidth, rotation=rotation,
+                        scene=scene, ofile=out_basename,
+                        ores=(args.res, args.res))
     if each:
-        plot_each_shell(ms, centroids, plot_sym_vecs=sym, use_sphere=sph, same_color=same,
-                        rad=0.025, opacity=args.opacity,
-                        ofile=out_basename, ores=(args.res, args.res))
+        load_colors(n_shells)
+        if cusp:
+            preload_cusp_cube(
+                cusp_ms, np.array(cusp_centroids), args.b_nominal,
+                use_sym=sym, use_cube=sph, use_vectors=vec, same_color=same,
+                render=True, opacity=args.opacity, linewidth=linewidth,
+                rotation=rotation, ofile=out_basename,
+                ores=(args.res, args.res))
+
+        plot_each_shell(ms, centroids, plot_sym_vecs=sym, use_sphere=sph,
+                        use_vectors=vec, same_color=same, rad=0.025,
+                        opacity=args.opacity, linewidth=linewidth,
+                        rotation=rotation, ofile=out_basename,
+                        ores=(args.res, args.res))
 
 
 if __name__ == "__main__":
