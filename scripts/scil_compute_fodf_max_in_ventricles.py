@@ -49,6 +49,9 @@ def _build_arg_parser():
                    help='Minimal threshold of MD in mm2/s (voxels above that '
                         'threshold are considered for '
                         'evaluation, [%(default)s]).')
+    p.add_argument('--center', type=int, nargs=3,
+                   help='Define the center of the brain, from where '
+                        'the volume will be sliced to find the ventricles')
     p.add_argument('--max_value_output',  metavar='file',
                    help='Output path for the text file containing the value. '
                         'If not set the file will not be saved.')
@@ -88,9 +91,13 @@ def get_ventricles_max_fodf(data, fa, md, zoom, args):
     else:
         max_number_of_voxels = 1000
 
-    all_i = list(range(int(data.shape[0]/2) - step, int(data.shape[0]/2) + step))
-    all_j = list(range(int(data.shape[1]/2) - step, int(data.shape[1]/2) + step))
-    all_k = list(range(int(data.shape[2]/2) - step, int(data.shape[2]/2) + step))
+    center = [int(data.shape[0]/2), int(data.shape[1]/2), int(data.shape[2]/2)]
+    if 'center' in args:
+        center = args.center
+
+    all_i = list(range(center[0] - step, center[0] + step))
+    all_j = list(range(center[1] - step, center[1] + step))
+    all_k = list(range(center[2] - step, center[2] + step))
     for i in all_i:
         for j in all_j:
             for k in all_k:
